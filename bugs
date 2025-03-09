@@ -1,0 +1,601 @@
+--[[
+Key UI -> Main Aimbot & ESP UI (task.spawn instead of spawn)
+Analysis of the script:
+1) Key input UI at the start (Enter Key window). The user can type "IamHungry" or "gksdn".
+2) If correct, it destroys the key UI and loads the main Aimbot & ESP UI.
+3) The script includes a team check system that looks for: player.Team, leaderstats.Team, player:GetAttribute("Team").
+4) All usage of 'spawn(...)' is replaced by 'task.spawn(...)' to avoid environment-specific errors.
+5) The bug about the error message being covered by the Confirm button is fixed by re-positioning statusLabelK.
+6) Pressing ENTER inside the TextBox calls the same validation as the Confirm button.
+7) Lines like 470 or 490 that used spawn(...) are changed to task.spawn(...), ensuring no environment issues.
+]]
+
+--------------------------------------------------------------------------------
+-- Keys
+--------------------------------------------------------------------------------
+local validKeys = {
+    ["IamHungry"] = true,
+    ["gksdn"] = true
+}
+local userHasKey = false
+
+--------------------------------------------------------------------------------
+-- Services
+--------------------------------------------------------------------------------
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
+
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+--------------------------------------------------------------------------------
+-- Aimbot/ESP Vars
+--------------------------------------------------------------------------------
+local aimbotEnabled = false
+local espEnabled = false
+local teamCheckEnabled = false
+local aiming = false
+local espObjects = {}
+local ESP_COLOR = Color3.fromRGB(255, 0, 0)
+local startTime = os.time()
+
+--------------------------------------------------------------------------------
+-- Remove old UI if re-run
+--------------------------------------------------------------------------------
+for _,ui in ipairs(CoreGui:GetChildren()) do
+    if ui.Name == "AimbotKeyUI" or ui.Name == "AimbotGUI" then
+        ui:Destroy()
+    end
+end
+for _,obj in ipairs(CoreGui:GetChildren()) do
+    if obj:IsA("BoxHandleAdornment") or obj:IsA("BillboardGui") then
+        obj:Destroy()
+    end
+end
+
+--------------------------------------------------------------------------------
+-- Team Check (TeamColor removed)
+--------------------------------------------------------------------------------
+local function getPlayerTeam(p)
+    print("[TEAM DEBUG] Checking team for", p.Name)
+
+    -- 1) player.Team
+    if p.Team then
+        print("    -> p.Team:", p.Team.Name)
+        return p.Team.Name
+    end
+
+    -- 2) leaderstats.Team
+    if p:FindFirstChild("leaderstats") then
+        local ls = p.leaderstats
+        local teamStat = ls:FindFirstChild("Team")
+        if teamStat and (teamStat:IsA("StringValue") or teamStat:IsA("IntValue")) then
+            print("    -> leaderstats.Team:", teamStat.Value)
+            return tostring(teamStat.Value)
+        end
+    end
+
+    -- 3) Attribute("Team")
+    local attrTeam = p:GetAttribute("Team")
+    if attrTeam then
+        print("    -> Attribute('Team'):", attrTeam)
+        return tostring(attrTeam)
+    end
+
+    print("    -> No team found => returning nil")
+    return nil
+end
+
+local function isSameTeam(player)
+    if not teamCheckEnabled then
+        return false
+    end
+
+    local myTeam = getPlayerTeam(LocalPlayer)
+    local otherTeam = getPlayerTeam(player)
+    if not myTeam or not otherTeam then
+        return false
+    end
+    return myTeam == otherTeam
+end
+
+--------------------------------------------------------------------------------
+-- Load Main Aimbot & ESP after correct key
+--------------------------------------------------------------------------------
+local function loadAimbotESP()
+    print("[INFO] Key confirmed. Loading Aimbot & ESP UI...")
+
+    for _,ui in ipairs(CoreGui:GetChildren()) do
+        if ui.Name == "AimbotGUI" then
+            ui:Destroy()
+        end
+    end
+    for _,obj in ipairs(CoreGui:GetChildren()) do
+        if obj:IsA("BoxHandleAdornment") or obj:IsA("BillboardGui") then
+            obj:Destroy()
+        end
+    end
+
+    local screenGui = Instance.new("ScreenGui")
+    screenGui.Name = "AimbotGUI"
+    screenGui.ResetOnSpawn = false
+    screenGui.Parent = CoreGui
+
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Size = UDim2.new(0, 260, 0, 300)
+    mainFrame.Position = UDim2.new(0, 50, 0, 50)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Active = true
+    mainFrame.Draggable = true
+    mainFrame.Name = "MainFrame"
+    mainFrame.Parent = screenGui
+
+    local gradient = Instance.new("UIGradient")
+    gradient.Color = ColorSequence.new{
+        ColorSequenceKeypoint.new(0.0, Color3.fromRGB(65, 30, 90)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(40, 40, 120)),
+        ColorSequenceKeypoint.new(1.0, Color3.fromRGB(25, 90, 90))
+    }
+    gradient.Rotation = 45
+    gradient.Parent = mainFrame
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = mainFrame
+
+    local stroke = Instance.new("UIStroke")
+    stroke.Thickness = 2
+    stroke.Color = Color3.fromRGB(60, 60, 60)
+    stroke.Parent = mainFrame
+
+    local topBar = Instance.new("Frame")
+    topBar.Size = UDim2.new(1, 0, 0, 25)
+    topBar.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    topBar.BorderSizePixel = 0
+    topBar.Name = "TopBar"
+    topBar.Parent = mainFrame
+
+    local topBarCorner = Instance.new("UICorner")
+    topBarCorner.CornerRadius = UDim.new(0,8)
+    topBarCorner.Parent = topBar
+
+    local closeButton = Instance.new("TextButton")
+    closeButton.Size = UDim2.new(0,20,0,20)
+    closeButton.Position = UDim2.new(0,5,0,2)
+    closeButton.BackgroundColor3 = Color3.fromRGB(230,50,50)
+    closeButton.Text = ""
+    closeButton.Name = "CloseButton"
+    closeButton.Parent = topBar
+
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(1,0)
+    closeCorner.Parent = closeButton
+
+    local closeStroke = Instance.new("UIStroke")
+    closeStroke.Thickness = 1
+    closeStroke.Color = Color3.fromRGB(150,30,30)
+    closeStroke.Parent = closeButton
+
+    local minimizeButton = Instance.new("TextButton")
+    minimizeButton.Size = UDim2.new(0,20,0,20)
+    minimizeButton.Position = UDim2.new(0,30,0,2)
+    minimizeButton.BackgroundColor3 = Color3.fromRGB(240,220,40)
+    minimizeButton.Text = ""
+    minimizeButton.Name = "MinimizeButton"
+    minimizeButton.Parent = topBar
+
+    local minCorner = Instance.new("UICorner")
+    minCorner.CornerRadius = UDim.new(1,0)
+    minCorner.Parent = minimizeButton
+
+    local minStroke = Instance.new("UIStroke")
+    minStroke.Thickness = 1
+    minStroke.Color = Color3.fromRGB(160,140,40)
+    minStroke.Parent = minimizeButton
+
+    local contentFrame = Instance.new("Frame")
+    contentFrame.Size = UDim2.new(1,0,1,-25)
+    contentFrame.Position = UDim2.new(0,0,0,25)
+    contentFrame.BackgroundTransparency = 1
+    contentFrame.Name = "ContentFrame"
+    contentFrame.Parent = mainFrame
+
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.AnchorPoint = Vector2.new(0.5,0)
+    titleLabel.Position = UDim2.new(0.5,0,0,10)
+    titleLabel.Size = UDim2.new(0,240,0,40)
+    titleLabel.BackgroundColor3 = Color3.fromRGB(25,25,25)
+    titleLabel.Text = "Aimbot Control"
+    titleLabel.TextColor3 = Color3.fromRGB(255,255,255)
+    titleLabel.Font = Enum.Font.SourceSansBold
+    titleLabel.TextSize = 20
+    titleLabel.Name = "TitleLabel"
+    titleLabel.Parent = contentFrame
+
+    local titleCorner = Instance.new("UICorner")
+    titleCorner.CornerRadius = UDim.new(0,8)
+    titleCorner.Parent = titleLabel
+
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Size = UDim2.new(1,0,0,20)
+    statusLabel.Position = UDim2.new(0,0,0,60)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Text = "Status: Ready"
+    statusLabel.TextColor3 = Color3.fromRGB(200,200,200)
+    statusLabel.Font = Enum.Font.SourceSans
+    statusLabel.TextSize = 16
+    statusLabel.Name = "StatusLabel"
+    statusLabel.Parent = contentFrame
+
+    local timeOpenLabel = Instance.new("TextLabel")
+    timeOpenLabel.Size = UDim2.new(1,0,0,20)
+    timeOpenLabel.Position = UDim2.new(0,0,0,85)
+    timeOpenLabel.BackgroundTransparency = 1
+    timeOpenLabel.Text = "Time Opened: 0s"
+    timeOpenLabel.TextColor3 = Color3.fromRGB(200,200,200)
+    timeOpenLabel.Font = Enum.Font.SourceSans
+    timeOpenLabel.TextSize = 16
+    timeOpenLabel.Name = "TimeOpenLabel"
+    timeOpenLabel.Parent = contentFrame
+
+    local function createToggleButton(text,posY,callback)
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(0,200,0,32)
+        btn.Position = UDim2.new(0.5,-100,0,posY)
+        btn.BackgroundColor3 = Color3.fromRGB(70,70,70)
+        btn.TextColor3 = Color3.fromRGB(255,255,255)
+        btn.Text = text
+        btn.Font = Enum.Font.SourceSansSemibold
+        btn.TextSize = 16
+        btn.Parent = contentFrame
+
+        local cornerBtn = Instance.new("UICorner")
+        cornerBtn.CornerRadius = UDim.new(0,6)
+        cornerBtn.Parent = btn
+
+        local strokeBtn = Instance.new("UIStroke")
+        strokeBtn.Thickness = 1
+        strokeBtn.Color = Color3.fromRGB(100,100,100)
+        strokeBtn.Parent = btn
+
+        local enabled = false
+        btn.MouseButton1Click:Connect(function()
+            enabled = not enabled
+            if enabled then
+                btn.BackgroundColor3 = Color3.fromRGB(0,160,0)
+            else
+                btn.BackgroundColor3 = Color3.fromRGB(70,70,70)
+            end
+            callback(enabled)
+            statusLabel.Text = "Status: "..text..(enabled and " Enabled" or " Disabled")
+        end)
+    end
+
+    createToggleButton("Aimbot",130,function(state)
+        aimbotEnabled = state
+    end)
+
+    createToggleButton("ESP",170,function(state)
+        espEnabled = state
+        updateAllESP()
+    end)
+
+    createToggleButton("Team Check",210,function(state)
+        teamCheckEnabled = state
+        updateAllESP()
+    end)
+
+    local credit = Instance.new("TextLabel")
+    credit.AnchorPoint = Vector2.new(0.5,1)
+    credit.Position = UDim2.new(0.5,0,1,-5)
+    credit.Size = UDim2.new(1,0,0,20)
+    credit.BackgroundTransparency = 1
+    credit.TextColor3 = Color3.fromRGB(120,120,120)
+    credit.Font = Enum.Font.SourceSansItalic
+    credit.TextSize = 14
+    credit.Text = "Made by iamhungry"
+    credit.Parent = contentFrame
+
+    local isMinimized = false
+    minimizeButton.MouseButton1Click:Connect(function()
+        isMinimized = not isMinimized
+        if isMinimized then
+            local tweenInfo = TweenInfo.new(0.3,Enum.EasingStyle.Sine,Enum.EasingDirection.Out)
+            local tween = TweenService:Create(mainFrame,tweenInfo,{Size=UDim2.new(0,260,0,25)})
+            contentFrame.Visible = false
+            tween:Play()
+        else
+            local tweenInfo = TweenInfo.new(0.3,Enum.EasingStyle.Sine,Enum.EasingDirection.Out)
+            local tween = TweenService:Create(mainFrame,tweenInfo,{Size=UDim2.new(0,260,0,300)})
+            tween:Play()
+            tween.Completed:Connect(function()
+                contentFrame.Visible = true
+            end)
+        end
+    end)
+
+    closeButton.MouseButton1Click:Connect(function()
+        -- do nothing
+    end)
+
+    local GUI_ENABLED = true
+    UserInputService.InputBegan:Connect(function(input,gp)
+        if gp then return end
+        if input.KeyCode == Enum.KeyCode.Delete then
+            GUI_ENABLED = not GUI_ENABLED
+            mainFrame.Visible = GUI_ENABLED
+        end
+    end)
+
+    -- line around 470: replaced spawn(...) with task.spawn
+    task.spawn(function()
+        local hue = 0
+        while task.wait(0.02) do
+            hue = (hue + 1) % 360
+            stroke.Color = Color3.fromHSV(hue / 360, 0.8, 1)
+        end
+    end)
+
+    local function getClosestEnemy()
+        if not aimbotEnabled then return nil end
+        local closest, minDist = nil, math.huge
+        for _,p in ipairs(Players:GetPlayers()) do
+            if p~=LocalPlayer and p.Character and p.Character:FindFirstChild("Head") and p.Character:FindFirstChild("Humanoid") then
+                local hum = p.Character.Humanoid
+                if hum.Health>0 then
+                    if not (teamCheckEnabled and isSameTeam(p)) then
+                        local head = p.Character.Head
+                        local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
+                        if onScreen then
+                            local dist = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)).Magnitude
+                            if dist < minDist then
+                                minDist = dist
+                                closest = head
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        return closest
+    end
+
+    local function aimAt(target)
+        if target then
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, target.Position)
+        end
+    end
+
+    UserInputService.InputBegan:Connect(function(input,gp)
+        if gp then return end
+        if input.UserInputType == Enum.UserInputType.MouseButton2 then
+            aiming = true
+        end
+    end)
+    UserInputService.InputEnded:Connect(function(input,gp)
+        if gp then return end
+        if input.UserInputType == Enum.UserInputType.MouseButton2 then
+            aiming = false
+        end
+    end)
+
+    RunService:BindToRenderStep("AimbotLoop",Enum.RenderPriority.Camera.Value,function()
+        if aiming and aimbotEnabled then
+            local target = getClosestEnemy()
+            if target then
+                aimAt(target)
+            end
+        end
+    end)
+
+    local function removeESP(player)
+        if espObjects[player.UserId] then
+            for _,obj in ipairs(espObjects[player.UserId]) do
+                if obj and obj.Parent then
+                    obj:Destroy()
+                end
+            end
+            espObjects[player.UserId] = nil
+        end
+    end
+
+    local function createESP(player)
+        if player==LocalPlayer then return end
+        removeESP(player)
+        if not espEnabled then return end
+        if teamCheckEnabled and isSameTeam(player) then
+            return
+        end
+        if not player.Character then return end
+
+        local list = {}
+        espObjects[player.UserId] = list
+
+        for _,part in ipairs(player.Character:GetChildren()) do
+            if part:IsA("BasePart") then
+                local box = Instance.new("BoxHandleAdornment")
+                box.Size = part.Size + Vector3.new(0.1,0.1,0.1)
+                box.Adornee = part
+                box.Color3 = ESP_COLOR
+                box.Transparency = 0.5
+                box.ZIndex = 0
+                box.AlwaysOnTop = true
+                box.Parent = CoreGui
+                table.insert(list, box)
+            end
+        end
+
+        local head = player.Character:FindFirstChild("Head")
+        if head then
+            local billboard = Instance.new("BillboardGui")
+            billboard.Size = UDim2.new(0,200,0,50)
+            billboard.Adornee = head
+            billboard.StudsOffset = Vector3.new(0,2,0)
+            billboard.AlwaysOnTop = true
+            billboard.Parent = CoreGui
+
+            local nameLabel = Instance.new("TextLabel")
+            nameLabel.Size = UDim2.new(1,0,1,0)
+            nameLabel.BackgroundTransparency = 1
+            nameLabel.TextColor3 = ESP_COLOR
+            nameLabel.Text = player.Name
+            nameLabel.TextScaled = true
+            nameLabel.Font = Enum.Font.SourceSansBold
+            nameLabel.Parent = billboard
+
+            table.insert(list, billboard)
+        end
+    end
+
+    function updateAllESP()
+        for _,player in ipairs(Players:GetPlayers()) do
+            createESP(player)
+        end
+    end
+
+    -- line around 490: replaced spawn(...) with task.spawn
+    task.spawn(function()
+        while task.wait(1) do
+            local elapsed = os.time() - startTime
+            local minutes = math.floor(elapsed/60)
+            local seconds = elapsed%60
+            if timeOpenLabel then
+                timeOpenLabel.Text = string.format("Time Opened: %dm %ds", minutes, seconds)
+            end
+        end
+    end)
+
+    local function onCharacterAdded(plr)
+        task.wait(0.5)
+        createESP(plr)
+    end
+
+    for _,plr in ipairs(Players:GetPlayers()) do
+        if plr.Character then
+            createESP(plr)
+        end
+        plr.CharacterAdded:Connect(function()
+            onCharacterAdded(plr)
+        end)
+    end
+    Players.PlayerAdded:Connect(function(plr)
+        plr.CharacterAdded:Connect(function()
+            onCharacterAdded(plr)
+        end)
+    end)
+    Players.PlayerRemoving:Connect(function(plr)
+        removeESP(plr)
+    end)
+
+    task.spawn(function()
+        while task.wait(3) do
+            updateAllESP()
+        end
+    end)
+
+    print("[Aimbot/ESP] Key Verified, Script Loaded. Press DELETE to hide/show GUI.")
+end
+
+--------------------------------------------------------------------------------
+-- Key UI
+--------------------------------------------------------------------------------
+local keyScreenGui = Instance.new("ScreenGui")
+keyScreenGui.Name = "AimbotKeyUI"
+keyScreenGui.ResetOnSpawn = false
+keyScreenGui.Parent = CoreGui
+
+local keyFrame = Instance.new("Frame")
+keyFrame.Size = UDim2.new(0,300,0,150)
+keyFrame.Position = UDim2.new(0.5,-150,0.5,-75)
+keyFrame.BackgroundColor3 = Color3.fromRGB(40,40,40)
+keyFrame.BorderSizePixel = 0
+keyFrame.Name = "KeyFrame"
+keyFrame.Parent = keyScreenGui
+
+local cornerK = Instance.new("UICorner")
+cornerK.CornerRadius = UDim.new(0,8)
+cornerK.Parent = keyFrame
+
+local titleLabelK = Instance.new("TextLabel")
+titleLabelK.Size = UDim2.new(1,0,0,40)
+titleLabelK.Position = UDim2.new(0,0,0,0)
+titleLabelK.BackgroundColor3 = Color3.fromRGB(25,25,25)
+titleLabelK.TextColor3 = Color3.new(1,1,1)
+titleLabelK.Text = "Enter Key"
+titleLabelK.Font = Enum.Font.SourceSansBold
+titleLabelK.TextSize = 20
+titleLabelK.Parent = keyFrame
+
+local corner2K = Instance.new("UICorner")
+corner2K.CornerRadius = UDim.new(0,8)
+corner2K.Parent = titleLabelK
+
+local keyBox = Instance.new("TextBox")
+keyBox.Size = UDim2.new(0,200,0,30)
+keyBox.Position = UDim2.new(0.5,-100,0,40)
+keyBox.Text = ""
+keyBox.PlaceholderText = "Enter Key Here"
+keyBox.BackgroundColor3 = Color3.fromRGB(60,60,60)
+keyBox.TextColor3 = Color3.new(1,1,1)
+keyBox.Font = Enum.Font.SourceSans
+keyBox.TextSize = 16
+keyBox.ClearTextOnFocus = false
+keyBox.Parent = keyFrame
+
+local corner3K = Instance.new("UICorner")
+corner3K.CornerRadius = UDim.new(0,6)
+corner3K.Parent = keyBox
+
+local statusLabelK = Instance.new("TextLabel")
+statusLabelK.Size = UDim2.new(1,0,0,20)
+statusLabelK.Position = UDim2.new(0,0,0,80)
+statusLabelK.BackgroundTransparency = 1
+statusLabelK.Text = ""
+statusLabelK.TextColor3 = Color3.new(1,0.2,0.2)
+statusLabelK.Font = Enum.Font.SourceSans
+statusLabelK.TextSize = 16
+statusLabelK.Parent = keyFrame
+
+local confirmBtn = Instance.new("TextButton")
+confirmBtn.Size = UDim2.new(0,80,0,30)
+confirmBtn.Position = UDim2.new(0.5,-40,1,-40)
+confirmBtn.BackgroundColor3 = Color3.fromRGB(0,160,0)
+confirmBtn.Text = "Confirm"
+confirmBtn.TextColor3 = Color3.new(1,1,1)
+confirmBtn.Font = Enum.Font.SourceSansSemibold
+confirmBtn.TextSize = 16
+confirmBtn.Parent = keyFrame
+
+local corner4K = Instance.new("UICorner")
+corner4K.CornerRadius = UDim.new(0,6)
+corner4K.Parent = confirmBtn
+
+local function tryKey()
+    local typed = keyBox.Text
+    if validKeys[typed] then
+        userHasKey = true
+        statusLabelK.Text = "[OK] Valid key!"
+        task.wait(0.5)
+        keyScreenGui:Destroy()
+        loadAimbotESP()
+    else
+        userHasKey = false
+        statusLabelK.Text = "[ERROR] Invalid key!"
+    end
+end
+
+confirmBtn.MouseButton1Click:Connect(function()
+    tryKey()
+end)
+
+keyBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then
+        tryKey()
+    end
+end)
+
+print("[KeySystem] Script Loaded. Waiting for key input...")
