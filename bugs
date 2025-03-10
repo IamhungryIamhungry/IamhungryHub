@@ -1,1 +1,711 @@
+local a = {IamHungry = true, gksdn = true}
+local b = false
 
+local c = game:GetService("Players")
+local d = game:GetService("RunService")
+local e = game:GetService("UserInputService")
+local f = game:GetService("CoreGui")
+local g = game:GetService("TweenService")
+local h = game:GetService("TeleportService")
+local i = game:GetService("HttpService")
+
+local j = workspace.CurrentCamera
+local k = c.LocalPlayer
+
+local l = false -- Aimbot 활성화 상태
+local m = false -- ESP 활성화 상태
+local n = false -- 팀 체크 활성화 상태
+local o = false -- 마우스 버튼 누름 상태
+local p = {} -- ESP 객체 저장 테이블
+local q = Color3.fromRGB(255, 0, 0) -- ESP 색상
+
+local r = false -- AntiBan 활성화 상태
+local s, t -- AntiBan 메타테이블 변수
+
+-- AntiBan 기능 활성화
+local function AntiBanOn()
+    if r then return end
+    r = true
+    
+    -- 필수 환경 함수 확인
+    if not (getrawmetatable and hookmetamethod and getnamecallmethod) then
+        print("[AntiBan] Some environment functions missing.")
+        return
+    end
+    
+    -- 메타메서드 후킹 (Kick 방지)
+    t = getrawmetatable(game)
+    s = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
+        if method == "Kick" then
+            print("[AntiBan] Blocked Kick call!")
+            return nil
+        end
+        return s(self, ...)
+    end)
+    
+    print("[AntiBan] ON - Hooked Kick calls.")
+end
+
+-- AntiBan 기능 비활성화
+local function AntiBanOff()
+    if not r then return end
+    r = false
+    
+    if t and s then
+        t.__namecall = s
+        print("[AntiBan] OFF - Restored metamethod.")
+    end
+end
+
+-- 기존 UI 정리
+for _, v in ipairs(f:GetChildren()) do
+    if v.Name == "AimbotKeyUI" or v.Name == "AimbotGUI" then
+        v:Destroy()
+    end
+end
+
+for _, v in ipairs(f:GetChildren()) do
+    if v:IsA("BoxHandleAdornment") or v:IsA("BillboardGui") then
+        v:Destroy()
+    end
+end
+
+-- 플레이어 팀 정보 가져오기 함수
+local function getPlayerTeam(player)
+    if player.Team then
+        return player.Team.Name
+    end
+    
+    local leaderstats = player:FindFirstChild("leaderstats")
+    if leaderstats then
+        local teamValue = leaderstats:FindFirstChild("Team")
+        if teamValue and (teamValue:IsA("StringValue") or teamValue:IsA("IntValue")) then
+            return tostring(teamValue.Value)
+        end
+    end
+    
+    local teamAttribute = player:GetAttribute("Team")
+    if teamAttribute then
+        return tostring(teamAttribute)
+    end
+    
+    return "(NoTeam)"
+end
+
+-- 같은 팀인지 확인하는 함수
+local function isSameTeam(player)
+    if not n then return false end
+    
+    local myTeam = getPlayerTeam(k)
+    local playerTeam = getPlayerTeam(player)
+    
+    print("[TEAM CHECK] MyTeam=", myTeam, " vs PlayerTeam=", playerTeam)
+    return (myTeam == playerTeam)
+end
+
+-- 서버 호핑 함수
+local function doServerHop()
+    local placeId = game.PlaceId
+    local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(placeId)
+    
+    local success, result = pcall(function()
+        return i:JSONDecode(game:HttpGet(url))
+    end)
+    
+    if not success or not result or not result.data then
+        print("[ServerHop] Could not fetch servers or data missing.")
+        return
+    end
+    
+    for _, server in ipairs(result.data) do
+        if server.id ~= game.JobId and server.playing < server.maxPlayers then
+            print("[ServerHop] Found server:", server.id)
+            h:TeleportToPlaceInstance(placeId, server.id, k)
+            return
+        end
+    end
+    
+    print("[ServerHop] No suitable server found.")
+end
+
+-- 메인 UI 로드 함수
+local function loadAimbotESP()
+    print("[INFO] Key correct. Loading main UI...")
+    AntiBanOff()
+    local startTime = os.time()
+
+    -- 기존 UI 제거
+    for _, gui in ipairs(f:GetChildren()) do
+        if gui.Name == "AimbotGUI" then
+            gui:Destroy()
+        end
+    end
+    
+    for _, obj in ipairs(f:GetChildren()) do
+        if obj:IsA("BoxHandleAdornment") or obj:IsA("BillboardGui") then
+            obj:Destroy()
+        end
+    end
+    
+    -- 메인 GUI 생성
+    local mainGui = Instance.new("ScreenGui")
+    mainGui.Name = "AimbotGUI"
+    mainGui.ResetOnSpawn = false
+    mainGui.Parent = f
+    
+    local mainFrame = Instance.new("Frame")
+    mainFrame.Size = UDim2.new(0, 300, 0, 360)
+    mainFrame.Position = UDim2.new(0.5, -150, 0.5, -180)
+    mainFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    mainFrame.BorderSizePixel = 0
+    mainFrame.Active = true
+    mainFrame.Draggable = true
+    mainFrame.Name = "MainFrame"
+    mainFrame.Parent = mainGui
+    
+    local gradient = Instance.new("UIGradient")
+    gradient.Color = ColorSequence.new{
+        ColorSequenceKeypoint.new(0.0, Color3.fromRGB(75, 35, 100)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(40, 40, 120)),
+        ColorSequenceKeypoint.new(1.0, Color3.fromRGB(25, 90, 90))
+    }
+    gradient.Rotation = 45
+    gradient.Parent = mainFrame
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 8)
+    corner.Parent = mainFrame
+    
+    local stroke = Instance.new("UIStroke")
+    stroke.Thickness = 2
+    stroke.Color = Color3.fromRGB(60, 60, 60)
+    stroke.Parent = mainFrame
+    
+    -- 헤더 프레임
+    local headerFrame = Instance.new("Frame")
+    headerFrame.Size = UDim2.new(1, 0, 0, 25)
+    headerFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    headerFrame.BorderSizePixel = 0
+    headerFrame.Parent = mainFrame
+    
+    local headerCorner = Instance.new("UICorner")
+    headerCorner.CornerRadius = UDim.new(0, 8)
+    headerCorner.Parent = headerFrame
+    
+    -- 닫기 버튼
+    local closeBtn = Instance.new("TextButton")
+    closeBtn.Size = UDim2.new(0, 20, 0, 20)
+    closeBtn.Position = UDim2.new(0, 5, 0, 2)
+    closeBtn.BackgroundColor3 = Color3.fromRGB(230, 50, 50)
+    closeBtn.Text = ""
+    closeBtn.Parent = headerFrame
+    
+    local closeCorner = Instance.new("UICorner")
+    closeCorner.CornerRadius = UDim.new(1, 0)
+    closeCorner.Parent = closeBtn
+    
+    local closeStroke = Instance.new("UIStroke")
+    closeStroke.Thickness = 1
+    closeStroke.Color = Color3.fromRGB(150, 30, 30)
+    closeStroke.Parent = closeBtn
+    
+    closeBtn.MouseButton1Click:Connect(function()
+        mainFrame.Visible = false
+    end)
+    
+    -- 최소화 버튼
+    local minimizeBtn = Instance.new("TextButton")
+    minimizeBtn.Size = UDim2.new(0, 20, 0, 20)
+    minimizeBtn.Position = UDim2.new(0, 30, 0, 2)
+    minimizeBtn.BackgroundColor3 = Color3.fromRGB(240, 220, 40)
+    minimizeBtn.Text = ""
+    minimizeBtn.Name = "MinimizeButton"
+    minimizeBtn.Parent = headerFrame
+    
+    local minimizeCorner = Instance.new("UICorner")
+    minimizeCorner.CornerRadius = UDim.new(1, 0)
+    minimizeCorner.Parent = minimizeBtn
+    
+    local minimizeStroke = Instance.new("UIStroke")
+    minimizeStroke.Thickness = 1
+    minimizeStroke.Color = Color3.fromRGB(160, 140, 40)
+    minimizeStroke.Parent = minimizeBtn
+    
+    -- 콘텐츠 프레임
+    local contentFrame = Instance.new("Frame")
+    contentFrame.Size = UDim2.new(1, 0, 1, -25)
+    contentFrame.Position = UDim2.new(0, 0, 0, 25)
+    contentFrame.BackgroundTransparency = 1
+    contentFrame.Name = "ContentFrame"
+    contentFrame.Parent = mainFrame
+    
+    -- 타이틀
+    local titleLabel = Instance.new("TextLabel")
+    titleLabel.Size = UDim2.new(1, -20, 0, 40)
+    titleLabel.Position = UDim2.new(0.5, 0, 0, 8)
+    titleLabel.AnchorPoint = Vector2.new(0.5, 0)
+    titleLabel.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+    titleLabel.Text = "Aimbot & ESP Control"
+    titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+    titleLabel.Font = Enum.Font.SourceSansBold
+    titleLabel.TextSize = 20
+    titleLabel.TextXAlignment = Enum.TextXAlignment.Center
+    titleLabel.Parent = contentFrame
+    
+    local titleCorner = Instance.new("UICorner")
+    titleCorner.CornerRadius = UDim.new(0, 8)
+    titleCorner.Parent = titleLabel
+    
+    -- 상태 라벨
+    local statusLabel = Instance.new("TextLabel")
+    statusLabel.Size = UDim2.new(1, 0, 0, 20)
+    statusLabel.Position = UDim2.new(0, 0, 0, 52)
+    statusLabel.BackgroundTransparency = 1
+    statusLabel.Text = "Status: Ready"
+    statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    statusLabel.Font = Enum.Font.SourceSans
+    statusLabel.TextSize = 16
+    statusLabel.TextXAlignment = Enum.TextXAlignment.Center
+    statusLabel.Name = "StatusLabel"
+    statusLabel.Parent = contentFrame
+    
+    -- 시간 라벨
+    local timeLabel = Instance.new("TextLabel")
+    timeLabel.Size = UDim2.new(1, 0, 0, 20)
+    timeLabel.Position = UDim2.new(0, 0, 0, 75)
+    timeLabel.BackgroundTransparency = 1
+    timeLabel.Text = "Time Opened: 0s"
+    timeLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+    timeLabel.Font = Enum.Font.SourceSans
+    timeLabel.TextSize = 16
+    timeLabel.TextXAlignment = Enum.TextXAlignment.Center
+    timeLabel.Name = "TimeOpenLabel"
+    timeLabel.Parent = contentFrame
+    
+    -- 최소화 버튼 기능 구현
+    local isMinimized = false
+    minimizeBtn.MouseButton1Click:Connect(function()
+        isMinimized = not isMinimized
+        if isMinimized then
+            local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+            local tween = g:Create(mainFrame, tweenInfo, {Size = UDim2.new(0, 300, 0, 25)})
+            contentFrame.Visible = false
+            tween:Play()
+        else
+            local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+            local tween = g:Create(mainFrame, tweenInfo, {Size = UDim2.new(0, 300, 0, 360)})
+            tween:Play()
+            tween.Completed:Connect(function()
+                contentFrame.Visible = true
+            end)
+        end
+    end)
+    
+    -- 토글 버튼 생성 함수
+    local function createToggleButton(text, yPos, callback)
+        local button = Instance.new("TextButton")
+        button.Size = UDim2.new(0, 200, 0, 32)
+        button.Position = UDim2.new(0.5, 0, 0, yPos)
+        button.AnchorPoint = Vector2.new(0.5, 0)
+        button.BackgroundColor3 = Color3.fromRGB(70, 70, 70)
+        button.TextColor3 = Color3.fromRGB(255, 255, 255)
+        button.Text = text
+        button.Font = Enum.Font.SourceSansSemibold
+        button.TextSize = 16
+        button.Parent = contentFrame
+        
+        local buttonCorner = Instance.new("UICorner")
+        buttonCorner.CornerRadius = UDim.new(0, 6)
+        buttonCorner.Parent = button
+        
+        local buttonStroke = Instance.new("UIStroke")
+        buttonStroke.Thickness = 1
+        buttonStroke.Color = Color3.fromRGB(100, 100, 100)
+        buttonStroke.Parent = button
+        
+        local enabled = false
+        button.MouseButton1Click:Connect(function()
+            enabled = not enabled
+            button.BackgroundColor3 = enabled and Color3.fromRGB(0, 160, 0) or Color3.fromRGB(70, 70, 70)
+            callback(enabled)
+            statusLabel.Text = "Status: " .. text .. (enabled and " Enabled" or " Disabled")
+        end)
+        
+        return button
+    end
+    
+    -- 각 기능 버튼 생성
+    local aimbotBtn = createToggleButton("Aimbot", 110, function(enabled)
+        l = enabled
+        print("[DEBUG] Aimbot set to: " .. tostring(l))
+    end)
+    
+    local espBtn = createToggleButton("ESP", 150, function(enabled)
+        m = enabled
+        print("[DEBUG] ESP set to: " .. tostring(m))
+        task.spawn(function() updateAllESP() end)
+    end)
+    
+    local teamCheckBtn = createToggleButton("Team Check", 190, function(enabled)
+        n = enabled
+        print("[DEBUG] Team Check set to: " .. tostring(n))
+        task.spawn(function() updateAllESP() end)
+    end)
+    
+    local antiBanBtn = createToggleButton("AntiBan", 230, function(enabled)
+        if enabled then
+            AntiBanOn()
+        else
+            AntiBanOff()
+        end
+    end)
+    
+    -- 팀 체크 기본값 설정
+    teamCheckBtn.MouseButton1Click:Fire()  -- 팀 체크 활성화
+    
+    -- 서버 호핑 프레임
+    local hopFrame = Instance.new("Frame")
+    hopFrame.Size = UDim2.new(0, 200, 0, 30)
+    hopFrame.Position = UDim2.new(0.5, 0, 0, 270)
+    hopFrame.AnchorPoint = Vector2.new(0.5, 0)
+    hopFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    hopFrame.BorderSizePixel = 0
+    hopFrame.Name = "HopFrame"
+    hopFrame.Parent = contentFrame
+    
+    local hopCorner = Instance.new("UICorner")
+    hopCorner.CornerRadius = UDim.new(0, 8)
+    hopCorner.Parent = hopFrame
+    
+    local hopArrow = Instance.new("TextButton")
+    hopArrow.Size = UDim2.new(0, 20, 0, 20)
+    hopArrow.Position = UDim2.new(0, 5, 0, 5)
+    hopArrow.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    hopArrow.Text = "▶"
+    hopArrow.Font = Enum.Font.SourceSansBold
+    hopArrow.TextColor3 = Color3.fromRGB(255, 255, 255)
+    hopArrow.TextSize = 16
+    hopArrow.Name = "ServerHopArrow"
+    hopArrow.Parent = hopFrame
+    
+    local arrowCorner = Instance.new("UICorner")
+    arrowCorner.CornerRadius = UDim.new(1, 0)
+    arrowCorner.Parent = hopArrow
+    
+    local hopButton = Instance.new("TextButton")
+    hopButton.Size = UDim2.new(0, 165, 0, 20)  -- 더 넓게 수정
+    hopButton.Position = UDim2.new(0, 30, 0, 5)
+    hopButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+    hopButton.Text = "Server Hop"
+    hopButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+    hopButton.Font = Enum.Font.SourceSansSemibold
+    hopButton.TextSize = 14
+    hopButton.Name = "ServerHopBtn"
+    hopButton.Parent = hopFrame
+    
+    local hopButtonCorner = Instance.new("UICorner")
+    hopButtonCorner.CornerRadius = UDim.new(0, 6)
+    hopButtonCorner.Parent = hopButton
+    
+    -- 서버 호핑 UI 토글
+    local isHopCollapsed = true
+    hopArrow.MouseButton1Click:Connect(function()
+        isHopCollapsed = not isHopCollapsed
+        local tweenInfo = TweenInfo.new(0.3, Enum.EasingStyle.Sine, Enum.EasingDirection.Out)
+        
+        if isHopCollapsed then
+            hopArrow.Text = "▶"
+            hopButton.Visible = false
+            local tween = g:Create(hopFrame, tweenInfo, {Size = UDim2.new(0, 30, 0, 30)})
+            tween:Play()
+        else
+            hopArrow.Text = "▼"
+            local tween = g:Create(hopFrame, tweenInfo, {Size = UDim2.new(0, 200, 0, 30)})
+            tween:Play()
+            tween.Completed:Connect(function()
+                hopButton.Visible = true
+            end)
+        end
+    end)
+    
+    -- 서버 호핑 버튼 기능
+    hopButton.MouseButton1Click:Connect(function()
+        print("[ServerHop] Starting server hop...")
+        statusLabel.Text = "Status: Server Hopping..."
+        doServerHop()
+    end)
+    
+    -- UI 크기 조절 기능
+    local resizer = Instance.new("Frame")
+    resizer.Size = UDim2.new(0, 16, 0, 16)
+    resizer.AnchorPoint = Vector2.new(1, 1)
+    resizer.Position = UDim2.new(1, 0, 1, 0)
+    resizer.BackgroundTransparency = 1
+    resizer.Name = "Resizer"
+    resizer.Parent = mainFrame
+    
+    local isResizing = false
+    local lastMousePos
+    
+    resizer.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            isResizing = true
+            lastMousePos = input.Position
+        end
+    end)
+    
+    resizer.InputChanged:Connect(function(input)
+        if isResizing and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - lastMousePos
+            lastMousePos = input.Position
+            mainFrame.Size = mainFrame.Size + UDim2.new(0, delta.X, 0, delta.Y)
+        end
+    end)
+    
+    resizer.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            isResizing = false
+        end
+    end)
+    
+    -- UI 토글 키 (Delete)
+    local guiVisible = true
+    e.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        
+        if input.KeyCode == Enum.KeyCode.Delete then
+            guiVisible = not guiVisible
+            mainFrame.Visible = guiVisible
+        end
+    end)
+    
+    -- 테두리 애니메이션
+    task.spawn(function()
+        local hue = 0
+        while task.wait(0.02) do
+            hue = (hue + 1) % 360
+            stroke.Color = Color3.fromHSV(hue/360, 0.8, 1)
+        end
+    end)
+    
+    -- 가장 가까운 적 찾기 함수
+    local function getClosestEnemy()
+        if not l then return nil end
+        
+        local closestDistance, closestHead = math.huge, nil
+        
+        for _, player in ipairs(c:GetPlayers()) do
+            if player ~= k and player.Character and 
+               player.Character:FindFirstChild("Head") and 
+               player.Character:FindFirstChild("Humanoid") then
+                
+                local humanoid = player.Character.Humanoid
+                
+                if humanoid.Health > 0 then
+                    -- 팀 체크
+                    if not (n and isSameTeam(player)) then
+                        local head = player.Character.Head
+                        local pos, onScreen = j:WorldToViewportPoint(head.Position)
+                        
+                        if onScreen then
+                            local distance = (Vector2.new(pos.X, pos.Y) - Vector2.new(j.ViewportSize.X/2, j.ViewportSize.Y/2)).Magnitude
+                            
+                            if distance < closestDistance then
+                                closestDistance = distance
+                                closestHead = head
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        
+        return closestHead
+    end
+    
+    -- 에임 함수
+    local function aimAt(target)
+        if target then
+            j.CFrame = CFrame.new(j.CFrame.Position, target.Position)
+        end
+    end
+    
+    -- 에임 활성화 키 (마우스 우클릭)
+    e.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        
+        if input.UserInputType == Enum.UserInputType.MouseButton2 then  -- 우클릭으로 변경
+            o = true
+            print("[DEBUG] Aiming activated (mouse down)")
+        end
+    end)
+    
+    e.InputEnded:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        
+        if input.UserInputType == Enum.UserInputType.MouseButton2 then
+            o = false
+            print("[DEBUG] Aiming deactivated (mouse up)")
+        end
+    end)
+    
+    -- 에임봇 루프
+    d:BindToRenderStep("AimbotLoop", Enum.RenderPriority.Camera.Value, function()
+        if o and l then
+            local target = getClosestEnemy()
+            if target then
+                aimAt(target)
+            end
+        end
+    end)
+    
+    -- ESP 제거 함수
+    local function removeESP(player)
+        if p[player.UserId] then
+            for _, obj in ipairs(p[player.UserId]) do
+                if obj and obj.Parent then
+                    obj:Destroy()
+                end
+            end
+            p[player.UserId] = nil
+        end
+    end
+    
+    -- ESP 생성 함수
+    local function createESP(player)
+        if player == k then return end
+        
+        removeESP(player)
+        
+        if not m then 
+            print("[DEBUG] ESP disabled, not creating ESP for: " .. player.Name)
+            return 
+        end
+        
+        if n and isSameTeam(player) then
+            print("[DEBUG] Skipping ESP for teammate: " .. player.Name)
+            return
+        end
+        
+        if not player.Character then 
+            print("[DEBUG] No character for player: " .. player.Name)
+            return 
+        end
+        
+        print("[DEBUG] Creating ESP for: " .. player.Name)
+        
+        local espObjects = {}
+        p[player.UserId] = espObjects
+        
+        for _, part in ipairs(player.Character:GetChildren()) do
+            if part:IsA("BasePart") then
+                local box = Instance.new("BoxHandleAdornment")
+                box.Size = part.Size + Vector3.new(0.1, 0.1, 0.1)
+                box.Adornee = part
+                box.Color3 = q
+                box.Transparency = 0.5
+                box.ZIndex = 0
+                box.AlwaysOnTop = true
+                box.Parent = f
+                table.insert(espObjects, box)
+            end
+        end
+        
+        local head = player.Character:FindFirstChild("Head")
+        if head then
+            local billboard = Instance.new("BillboardGui")
+            billboard.Size = UDim2.new(0, 200, 0, 50)
+            billboard.Adornee = head
+            billboard.StudsOffset = Vector3.new(0, 2, 0)
+            billboard.AlwaysOnTop = true
+            billboard.Parent = f
+            
+            local nameLabel = Instance.new("TextLabel")
+            nameLabel.Size = UDim2.new(1, 0, 1, 0)
+            nameLabel.BackgroundTransparency = 1
+            nameLabel.TextColor3 = q
+            nameLabel.Text = player.Name
+            nameLabel.TextScaled = true
+            nameLabel.Font = Enum.Font.SourceSansBold
+            nameLabel.Parent = billboard
+            
+            table.insert(espObjects, billboard)
+        end
+    end
+    
+    -- 모든 플레이어 ESP 업데이트
+    function updateAllESP()
+        print("[DEBUG] Updating all ESP, ESP enabled: " .. tostring(m) .. ", Team Check: " .. tostring(n))
+        
+        for _, player in ipairs(c:GetPlayers()) do
+            if player ~= k then  -- 로컬 플레이어 제외
+                print("[DEBUG] Processing ESP for: " .. player.Name)
+                removeESP(player)  -- 기존 ESP 제거
+                
+                if m then  -- ESP가 활성화된 경우에만 생성
+                    createESP(player)
+                end
+            end
+        end
+    end
+    
+    -- 사용 시간 표시 업데이트
+    task.spawn(function()
+        while task.wait(1) do
+            local elapsed = os.time() - startTime
+            local minutes = math.floor(elapsed / 60)
+            local seconds = elapsed % 60
+            
+            if timeLabel then
+                timeLabel.Text = string.format("Time Opened: %dm %ds", minutes, seconds)
+            end
+        end
+    end)
+    
+    -- 플레이어 캐릭터 추가 이벤트 핸들러
+    local function onCharacterAdded(player)
+        print("[DEBUG] Character added for: " .. player.Name)
+        task.wait(0.5)  -- 캐릭터 로드 대기
+        createESP(player)
+    end
+    
+    -- 초기 ESP 설정 및 이벤트 연결
+    for _, player in ipairs(c:GetPlayers()) do
+        if player ~= k and player.Character then
+            createESP(player)
+        end
+        
+        player.CharacterAdded:Connect(function()
+            onCharacterAdded(player)
+        end)
+    end
+    
+    -- 플레이어 참가/퇴장 이벤트 처리
+    c.PlayerAdded:Connect(function(player)
+        print("[DEBUG] Player added: " .. player.Name)
+        player.CharacterAdded:Connect(function()
+            onCharacterAdded(player)
+        end)
+    end)
+    
+    c.PlayerRemoving:Connect(function(player)
+        print("[DEBUG] Player removing: " .. player.Name)
+        removeESP(player)
+    end)
+    
+    -- 주기적 ESP 업데이트
+    task.spawn(function()
+        while task.wait(3) do
+            updateAllESP()
+        end
+    end)
+    
+    print("[Aimbot/ESP] Loaded. Press DELETE to hide/show UI.")
+end
+
+-- 키 입력 UI 로드 함수
+local function loadKeyUI()
+    local keyUI = Instance.new("ScreenGui")
+    keyUI.Name = "AimbotKeyUI"
+    key
